@@ -43,7 +43,7 @@ func (s *Server) ServeHTTP() {
 	s.context.setMethod(method)
 
 	if len(reqLine) < 2 {
-		s.context.Err404()
+		_, _ = s.context.Err404()
 		return
 	}
 

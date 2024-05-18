@@ -12,6 +12,8 @@ import (
 	"os"
 )
 
+var headersError = errors.New("no header exists")
+
 type Context interface {
 	String(string, int) (int, error)
 	HTML(string, int) (int, error)
@@ -42,14 +44,15 @@ type Context interface {
 }
 
 type ctx struct {
-	conn      net.Conn
-	method    string
-	hostname  string
-	platform  string
-	userAgent string
-	accept    string
-	headers   map[string]string
-	body      io.ReadCloser
+	conn                net.Conn
+	method              string
+	hostname            string
+	platform            string
+	userAgent           string
+	accept              string
+	headers             map[string]string
+	didWriteHTTP1Header bool
+	body                io.ReadCloser
 }
 
 func newCtx() *ctx {
@@ -60,6 +63,18 @@ func newCtx() *ctx {
 
 func (c *ctx) Write(b []byte) (n int, err error) {
 	err = c.writeHeaders()
+	if err == headersError {
+		if !c.didWriteHTTP1Header {
+			err = c.writeHTTP1Header(StatusOK)
+			if err != nil {
+				log.Fatal("Could not write HTTP 1.1 header", err)
+			}
+		}
+
+		data := string(b)
+		c.SetHeader("Content-Length", fmt.Sprint(len(data)))
+		err = c.writeHeaders()
+	}
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -109,7 +124,10 @@ func (c *ctx) SetHeader(key, value string) {
 }
 
 func (c *ctx) String(plain string, statusCode int) (n int, err error) {
-	c.writeHTTP1Header(statusCode)
+	err = c.writeHTTP1Header(statusCode)
+	if err != nil {
+		log.Fatal("Could not write HTTP 1.1 header", err)
+	}
 	c.SetHeader("Content-Type", "text/plain")
 	c.SetHeader("Content-Length", fmt.Sprintf("%d", len(plain)))
 
@@ -117,7 +135,10 @@ func (c *ctx) String(plain string, statusCode int) (n int, err error) {
 }
 
 func (c *ctx) HTML(html string, statusCode int) (n int, err error) {
-	c.writeHTTP1Header(statusCode)
+	err = c.writeHTTP1Header(statusCode)
+	if err != nil {
+		log.Fatal("Could not write HTTP header", err)
+	}
 	c.SetHeader("Content-Type", "text/html")
 	c.SetHeader("Content-Length", fmt.Sprintf("%d", len(html)))
 
@@ -125,7 +146,10 @@ func (c *ctx) HTML(html string, statusCode int) (n int, err error) {
 }
 
 func (c *ctx) JSON(data any, statusCode int) error {
-	c.writeHTTP1Header(statusCode)
+	err := c.writeHTTP1Header(statusCode)
+	if err != nil {
+		log.Fatal("Could not write HTTP 1.1 header", err)
+	}
 	c.SetHeader("Content-Type", "application/json")
 	jsonRes, err := json.Marshal(data)
 	if err != nil {
@@ -139,9 +163,15 @@ func (c *ctx) JSON(data any, statusCode int) error {
 }
 
 func (c *ctx) Redirect(path string) error {
-	c.writeHTTP1Header(StatusFound)
+	err := c.writeHTTP1Header(StatusFound)
+	if err != nil {
+		log.Fatal("Could not write HTTP 1.1 header", err)
+	}
 	c.SetHeader("Location", path)
-	c.writeHeaders()
+	err = c.writeHeaders()
+	if err != nil {
+		log.Fatal("Could not write HTTP headers", err)
+	}
 
 	return c.conn.Close()
 }
@@ -149,7 +179,10 @@ func (c *ctx) Redirect(path string) error {
 func (c *ctx) Err404() (n int, err error) {
 	html := `<h1>Error 404 Not Found</h1>`
 
-	c.writeHTTP1Header(StatusNotFound)
+	err = c.writeHTTP1Header(StatusNotFound)
+	if err != nil {
+		log.Fatal("Could not write HTTP header", err)
+	}
 	c.SetHeader("Content-Type", "text/html")
 	c.SetHeader("Content-Length", fmt.Sprintf("%d", len(html)))
 	return c.Write([]byte(html))
@@ -161,7 +194,11 @@ func (c *ctx) File(path string, statusCode int) error {
 		return err
 	}
 
-	c.writeHTTP1Header(statusCode)
+	err = c.writeHTTP1Header(statusCode)
+	if err != nil {
+		log.Fatal("Could not write HTTP 1.1 header", err)
+	}
+
 	c.SetHeader("Content-Type", "text/html")
 	c.SetHeader("Content-Length", fmt.Sprintf("%d", len(file)))
 	_, err = c.Write(file)
@@ -172,10 +209,20 @@ func (c *ctx) writeHTTP1Header(statusCode int) error {
 	statusCodeString := StatusText(statusCode)
 
 	_, err := c.conn.Write([]byte(fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, statusCodeString)))
-	return err
+	if err != nil {
+		c.didWriteHTTP1Header = false
+		return err
+	}
+
+	c.didWriteHTTP1Header = true
+	return nil
 }
 
 func (c *ctx) writeHeaders() error {
+	if len(c.headers) == 0 {
+		return headersError
+	}
+
 	for key, value := range c.headers {
 		_, err := c.conn.Write([]byte(fmt.Sprintf("%s: %s\r\n", key, value)))
 		if err != nil {
