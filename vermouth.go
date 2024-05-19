@@ -76,7 +76,7 @@ func (s *Vermouth) ServeHTTP() {
 		if s.context.Platform() == "" {
 			platformLine := strings.Split(connection[6], " ")
 			if len(platformLine) > 1 {
-				s.context.setPlatform(platformLine[1][1 : len(platformLine[1])-1])
+				s.context.setPlatform(platformLine[1])
 			}
 		}
 	}
@@ -127,6 +127,10 @@ func (s *Vermouth) ServeHTTP() {
 func matchRoute(pattern, path string) (map[string]string, bool) {
 	patternParts := strings.Split(pattern, "/")
 	pathParts := strings.Split(path, "/")
+
+	if len(patternParts) > 0 && pathParts[len(pathParts)-1] == "" {
+		return nil, false
+	}
 
 	if len(patternParts) != len(pathParts) {
 		return nil, false
