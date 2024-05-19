@@ -10,22 +10,25 @@ import (
 
 type HandlerFunc func(c Context) error
 
+type route struct {
+	pattern string
+	handler HandlerFunc
+}
+
 type Vermouth struct {
-	paths   map[string]HandlerFunc
+	routes  []route
 	context Context
 }
 
-func NewVermouth() *Vermouth {
+func New() *Vermouth {
 	return &Vermouth{
-		paths:   make(map[string]HandlerFunc),
+		routes:  []route{},
 		context: newCtx(),
 	}
 }
 
-func (s *Vermouth) HandleFunc(path string, fn HandlerFunc) {
-	if _, ok := s.paths[path]; !ok {
-		s.paths[path] = fn
-	}
+func (s *Vermouth) HandleFunc(pattern string, fn HandlerFunc) {
+	s.routes = append(s.routes, route{pattern, fn})
 }
 
 func (s *Vermouth) ServeHTTP() {
@@ -96,7 +99,19 @@ func (s *Vermouth) ServeHTTP() {
 		}
 	}
 
-	if handler, ok := s.paths[path]; ok {
+	var handler HandlerFunc
+	var params map[string]string
+
+	for _, route := range s.routes {
+		if matchedParams, ok := matchRoute(route.pattern, path); ok {
+			handler = route.handler
+			params = matchedParams
+			break
+		}
+	}
+
+	if handler != nil {
+		s.context.setParams(params)
 		err := handler(s.context)
 		if err != nil {
 			slog.Error("Error handling the endpoint", err)
@@ -109,7 +124,27 @@ func (s *Vermouth) ServeHTTP() {
 	}
 }
 
-func (s *Vermouth) Start(port string) {
+func matchRoute(pattern, path string) (map[string]string, bool) {
+	patternParts := strings.Split(pattern, "/")
+	pathParts := strings.Split(path, "/")
+
+	if len(patternParts) != len(pathParts) {
+		return nil, false
+	}
+
+	params := make(map[string]string)
+	for i, part := range patternParts {
+		if strings.HasPrefix(part, ":") {
+			params[part[1:]] = pathParts[i]
+		} else if part != pathParts[i] {
+			return nil, false
+		}
+	}
+
+	return params, true
+}
+
+func (s *Vermouth) Start(port string) error {
 	l, err := net.Listen("tcp", port)
 	if err != nil {
 		log.Fatal(err)
@@ -119,7 +154,7 @@ func (s *Vermouth) Start(port string) {
 	for {
 		conn, err := l.Accept()
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 
 		s.context.setConn(conn)

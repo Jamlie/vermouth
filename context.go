@@ -32,6 +32,7 @@ type Context interface {
 	ParseJSON(any) error
 	ParseForm() (url.Values, error)
 	Redirect(string) error
+	Params(string) string
 
 	setMethod(string)
 	getConn() net.Conn
@@ -41,6 +42,7 @@ type Context interface {
 	setUserAgent(string)
 	setAccept(string)
 	setBody(io.ReadCloser)
+	setParams(map[string]string)
 }
 
 type ctx struct {
@@ -53,6 +55,7 @@ type ctx struct {
 	headers             map[string]string
 	didWriteHTTP1Header bool
 	body                io.ReadCloser
+	params              map[string]string
 }
 
 func newCtx() *ctx {
@@ -258,6 +261,10 @@ func (c *ctx) Body() io.ReadCloser {
 	return c.body
 }
 
+func (c *ctx) Params(key string) string {
+	return c.params[key]
+}
+
 func (c *ctx) getConn() net.Conn {
 	return c.conn
 }
@@ -288,4 +295,8 @@ func (c *ctx) setAccept(accept string) {
 
 func (c *ctx) setBody(body io.ReadCloser) {
 	c.body = body
+}
+
+func (c *ctx) setParams(params map[string]string) {
+	c.params = params
 }
