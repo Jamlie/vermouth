@@ -10,25 +10,25 @@ import (
 
 type HandlerFunc func(c Context) error
 
-type Server struct {
+type Vermouth struct {
 	paths   map[string]HandlerFunc
 	context Context
 }
 
-func NewServer() *Server {
-	return &Server{
+func NewVermouth() *Vermouth {
+	return &Vermouth{
 		paths:   make(map[string]HandlerFunc),
 		context: newCtx(),
 	}
 }
 
-func (s *Server) HandleFunc(path string, fn HandlerFunc) {
+func (s *Vermouth) HandleFunc(path string, fn HandlerFunc) {
 	if _, ok := s.paths[path]; !ok {
 		s.paths[path] = fn
 	}
 }
 
-func (s *Server) ServeHTTP() {
+func (s *Vermouth) ServeHTTP() {
 	data := make([]byte, 1024)
 	n, err := s.context.getConn().Read(data)
 	if err != nil {
@@ -109,7 +109,7 @@ func (s *Server) ServeHTTP() {
 	}
 }
 
-func (s *Server) Start(port string) {
+func (s *Vermouth) Start(port string) {
 	l, err := net.Listen("tcp", port)
 	if err != nil {
 		log.Fatal(err)
