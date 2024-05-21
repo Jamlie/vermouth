@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"strings"
+	"sync"
 )
 
 type HandlerFunc func(c Context) error
@@ -17,14 +18,13 @@ type route struct {
 }
 
 type Vermouth struct {
-	routes  []route
-	context Context
+	routes []route
+	mu     sync.Mutex
 }
 
 func New() *Vermouth {
 	return &Vermouth{
-		routes:  []route{},
-		context: newCtx(),
+		routes: []route{},
 	}
 }
 
@@ -49,12 +49,15 @@ func (v *Vermouth) PATCH(pattern string, fn HandlerFunc) {
 }
 
 func (v *Vermouth) handleFunc(method, pattern string, fn HandlerFunc) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	v.routes = append(v.routes, route{pattern, fn, method})
 }
 
-func (v *Vermouth) ServeHTTP() {
+func (v *Vermouth) ServeHTTP(conn net.Conn) {
+	defer conn.Close()
 	data := make([]byte, 1024)
-	n, err := v.context.getConn().Read(data)
+	n, err := conn.Read(data)
 	if err != nil {
 		log.Println(err)
 		return
@@ -63,19 +66,21 @@ func (v *Vermouth) ServeHTTP() {
 	connection := strings.Split(string(data[:n]), "\r\n")
 	reqLine := strings.Split(connection[0], " ")
 
-	method, path := reqLine[0], reqLine[1]
-	v.context.setMethod(method)
-
 	if len(reqLine) < 2 {
-		_, _ = v.context.Err404()
 		return
 	}
 
+	method, path := reqLine[0], reqLine[1]
+
+	context := newCtx()
+	context.setConn(conn)
+	context.setMethod(method)
+
 	if len(connection) > 1 {
-		if v.context.Host() == "" {
+		if context.Host() == "" {
 			hostLine := strings.Split(connection[1], " ")
 			if len(hostLine) > 1 {
-				v.context.setHost(hostLine[1])
+				context.setHost(hostLine[1])
 			}
 		}
 	}
@@ -88,34 +93,34 @@ func (v *Vermouth) ServeHTTP() {
 		}
 	}
 	if bodyIndex != -1 && len(connection) > bodyIndex {
-		v.context.setBody(io.NopCloser(
+		context.setBody(io.NopCloser(
 			strings.NewReader(strings.Join(connection[bodyIndex:], "\r\n")),
 		))
 	}
 
 	if len(connection) > 6 {
-		if v.context.Platform() == "" {
+		if context.Platform() == "" {
 			platformLine := strings.Split(connection[6], " ")
 			if len(platformLine) > 1 {
-				v.context.setPlatform(platformLine[1])
+				context.setPlatform(platformLine[1])
 			}
 		}
 	}
 
 	if len(connection) > 9 {
-		if v.context.UserAgent() == "" {
+		if context.UserAgent() == "" {
 			userAgentLine := strings.Split(connection[9], " ")
 			if len(userAgentLine) > 1 {
-				v.context.setUserAgent(userAgentLine[1])
+				context.setUserAgent(userAgentLine[1])
 			}
 		}
 	}
 
 	if len(connection) > 10 {
-		if v.context.Accept() == "" {
+		if context.Accept() == "" {
 			acceptLine := strings.Split(connection[10], " ")
 			if len(acceptLine) > 1 {
-				v.context.setAccept(acceptLine[1])
+				context.setAccept(acceptLine[1])
 			}
 		}
 	}
@@ -132,13 +137,13 @@ func (v *Vermouth) ServeHTTP() {
 	}
 
 	if handler != nil {
-		v.context.setParams(params)
-		err := handler(v.context)
+		context.setParams(params)
+		err := handler(context)
 		if err != nil {
 			slog.Error("Error handling the endpoint", err)
 		}
 	} else {
-		_, err := v.context.Err404()
+		_, err := context.Err404()
 		if err != nil {
 			slog.Error("Error", err)
 		}
@@ -178,11 +183,6 @@ func (v *Vermouth) Start(port string) error {
 			return err
 		}
 
-		v.context.setConn(conn)
-
-		go func() {
-			defer conn.Close()
-			v.ServeHTTP()
-		}()
+		go v.ServeHTTP(conn)
 	}
 }
