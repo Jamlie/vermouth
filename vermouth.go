@@ -13,6 +13,7 @@ type HandlerFunc func(c Context) error
 type route struct {
 	pattern string
 	handler HandlerFunc
+	method  string
 }
 
 type Vermouth struct {
@@ -27,13 +28,33 @@ func New() *Vermouth {
 	}
 }
 
-func (s *Vermouth) HandleFunc(pattern string, fn HandlerFunc) {
-	s.routes = append(s.routes, route{pattern, fn})
+func (v *Vermouth) GET(pattern string, fn HandlerFunc) {
+	v.handleFunc(MethodGet, pattern, fn)
 }
 
-func (s *Vermouth) ServeHTTP() {
+func (v *Vermouth) POST(pattern string, fn HandlerFunc) {
+	v.handleFunc(MethodPost, pattern, fn)
+}
+
+func (v *Vermouth) PUT(pattern string, fn HandlerFunc) {
+	v.handleFunc(MethodPut, pattern, fn)
+}
+
+func (v *Vermouth) DELETE(pattern string, fn HandlerFunc) {
+	v.handleFunc(MethodDelete, pattern, fn)
+}
+
+func (v *Vermouth) PATCH(pattern string, fn HandlerFunc) {
+	v.handleFunc(MethodPatch, pattern, fn)
+}
+
+func (v *Vermouth) handleFunc(method, pattern string, fn HandlerFunc) {
+	v.routes = append(v.routes, route{pattern, fn, method})
+}
+
+func (v *Vermouth) ServeHTTP() {
 	data := make([]byte, 1024)
-	n, err := s.context.getConn().Read(data)
+	n, err := v.context.getConn().Read(data)
 	if err != nil {
 		log.Println(err)
 		return
@@ -43,18 +64,18 @@ func (s *Vermouth) ServeHTTP() {
 	reqLine := strings.Split(connection[0], " ")
 
 	method, path := reqLine[0], reqLine[1]
-	s.context.setMethod(method)
+	v.context.setMethod(method)
 
 	if len(reqLine) < 2 {
-		_, _ = s.context.Err404()
+		_, _ = v.context.Err404()
 		return
 	}
 
 	if len(connection) > 1 {
-		if s.context.Host() == "" {
+		if v.context.Host() == "" {
 			hostLine := strings.Split(connection[1], " ")
 			if len(hostLine) > 1 {
-				s.context.setHost(hostLine[1])
+				v.context.setHost(hostLine[1])
 			}
 		}
 	}
@@ -67,34 +88,34 @@ func (s *Vermouth) ServeHTTP() {
 		}
 	}
 	if bodyIndex != -1 && len(connection) > bodyIndex {
-		s.context.setBody(io.NopCloser(
+		v.context.setBody(io.NopCloser(
 			strings.NewReader(strings.Join(connection[bodyIndex:], "\r\n")),
 		))
 	}
 
 	if len(connection) > 6 {
-		if s.context.Platform() == "" {
+		if v.context.Platform() == "" {
 			platformLine := strings.Split(connection[6], " ")
 			if len(platformLine) > 1 {
-				s.context.setPlatform(platformLine[1])
+				v.context.setPlatform(platformLine[1])
 			}
 		}
 	}
 
 	if len(connection) > 9 {
-		if s.context.UserAgent() == "" {
+		if v.context.UserAgent() == "" {
 			userAgentLine := strings.Split(connection[9], " ")
 			if len(userAgentLine) > 1 {
-				s.context.setUserAgent(userAgentLine[1])
+				v.context.setUserAgent(userAgentLine[1])
 			}
 		}
 	}
 
 	if len(connection) > 10 {
-		if s.context.Accept() == "" {
+		if v.context.Accept() == "" {
 			acceptLine := strings.Split(connection[10], " ")
 			if len(acceptLine) > 1 {
-				s.context.setAccept(acceptLine[1])
+				v.context.setAccept(acceptLine[1])
 			}
 		}
 	}
@@ -102,8 +123,8 @@ func (s *Vermouth) ServeHTTP() {
 	var handler HandlerFunc
 	var params map[string]string
 
-	for _, route := range s.routes {
-		if matchedParams, ok := matchRoute(route.pattern, path); ok {
+	for _, route := range v.routes {
+		if matchedParams, ok := matchRoute(route.pattern, path); ok && route.method == method {
 			handler = route.handler
 			params = matchedParams
 			break
@@ -111,13 +132,13 @@ func (s *Vermouth) ServeHTTP() {
 	}
 
 	if handler != nil {
-		s.context.setParams(params)
-		err := handler(s.context)
+		v.context.setParams(params)
+		err := handler(v.context)
 		if err != nil {
 			slog.Error("Error handling the endpoint", err)
 		}
 	} else {
-		_, err := s.context.Err404()
+		_, err := v.context.Err404()
 		if err != nil {
 			slog.Error("Error", err)
 		}
@@ -144,7 +165,7 @@ func matchRoute(pattern, path string) (map[string]string, bool) {
 	return params, true
 }
 
-func (s *Vermouth) Start(port string) error {
+func (v *Vermouth) Start(port string) error {
 	l, err := net.Listen("tcp", port)
 	if err != nil {
 		log.Fatal(err)
@@ -157,11 +178,11 @@ func (s *Vermouth) Start(port string) error {
 			return err
 		}
 
-		s.context.setConn(conn)
+		v.context.setConn(conn)
 
 		go func() {
 			defer conn.Close()
-			s.ServeHTTP()
+			v.ServeHTTP()
 		}()
 	}
 }
