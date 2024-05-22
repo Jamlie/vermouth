@@ -5,9 +5,6 @@ import (
 	"log"
 	"log/slog"
 	"net"
-	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -15,71 +12,24 @@ import (
 type (
 	HandlerFunc    func(c Context) error
 	MiddlewareFunc func(HandlerFunc) HandlerFunc
+
+	route struct {
+		pattern string
+		handler HandlerFunc
+		method  string
+	}
+
+	Vermouth struct {
+		routes      []route
+		middlewares []MiddlewareFunc
+		mu          sync.Mutex
+	}
 )
-
-type route struct {
-	pattern string
-	handler HandlerFunc
-	method  string
-}
-
-type Vermouth struct {
-	routes      []route
-	middlewares []MiddlewareFunc
-	mu          sync.Mutex
-}
 
 func New() *Vermouth {
 	return &Vermouth{
 		routes:      []route{},
 		middlewares: []MiddlewareFunc{},
-	}
-}
-
-func (v *Vermouth) Static(prefix, root string) MiddlewareFunc {
-	return func(next HandlerFunc) HandlerFunc {
-		return func(c Context) error {
-			if !strings.HasPrefix(c.Params("path"), prefix) {
-				return next(c)
-			}
-
-			relPath := strings.TrimPrefix(c.Params("path"), prefix)
-			relPath, err := url.PathUnescape(relPath)
-			if err != nil {
-				_, err := c.Err404()
-				return err
-			}
-
-			filePath := filepath.Join(root, relPath)
-			file, err := os.Open(filePath)
-			if err != nil {
-				if os.IsNotExist(err) {
-					_, err := c.Err404()
-					return err
-				}
-				return err
-			}
-			defer file.Close()
-
-			stat, err := file.Stat()
-			if err != nil {
-				return err
-			}
-
-			if stat.IsDir() {
-				indexPath := filepath.Join(filePath, "index.html")
-				_, err := os.Stat(indexPath)
-				if os.IsNotExist(err) {
-					_, err := c.Err404()
-					return err
-				} else if err != nil {
-					return err
-				}
-				filePath = indexPath
-			}
-
-			return c.File(filePath, StatusOK)
-		}
 	}
 }
 

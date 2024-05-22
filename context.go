@@ -1,6 +1,7 @@
 package vermouth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,49 +15,53 @@ import (
 
 var headersError = errors.New("no header exists")
 
-type Context interface {
-	String(string, int) (int, error)
-	HTML(string, int) (int, error)
-	JSON(any, int) error
-	Err404() (int, error)
-	File(string, int) error
-	Method() string
-	Host() string
-	Platform() string
-	UserAgent() string
-	Accept() string
-	SetHeader(string, string)
-	Write([]byte) (int, error)
-	Read([]byte) (int, error)
-	Body() io.ReadCloser
-	ParseJSON(any) error
-	ParseForm() (url.Values, error)
-	Redirect(string) error
-	Params(string) string
+type (
+	Context interface {
+		String(string, int) (int, error)
+		HTML(string, int) (int, error)
+		JSON(any, int) error
+		Err404() (int, error)
+		File(string, int) error
+		Method() string
+		Host() string
+		Platform() string
+		UserAgent() string
+		Accept() string
+		SetHeader(string, string)
+		Write([]byte) (int, error)
+		Read([]byte) (int, error)
+		Body() io.ReadCloser
+		ParseJSON(any) error
+		ParseForm() (url.Values, error)
+		Redirect(string) error
+		Params(string) string
+		Context() context.Context
 
-	setMethod(string)
-	getConn() net.Conn
-	setConn(net.Conn)
-	setHost(string)
-	setPlatform(string)
-	setUserAgent(string)
-	setAccept(string)
-	setBody(io.ReadCloser)
-	setParams(map[string]string)
-}
+		setMethod(string)
+		getConn() net.Conn
+		setConn(net.Conn)
+		setHost(string)
+		setPlatform(string)
+		setUserAgent(string)
+		setAccept(string)
+		setBody(io.ReadCloser)
+		setParams(map[string]string)
+	}
 
-type ctx struct {
-	conn                net.Conn
-	method              string
-	hostname            string
-	platform            string
-	userAgent           string
-	accept              string
-	headers             map[string]string
-	didWriteHTTP1Header bool
-	body                io.ReadCloser
-	params              map[string]string
-}
+	ctx struct {
+		conn                net.Conn
+		method              string
+		hostname            string
+		platform            string
+		userAgent           string
+		accept              string
+		headers             map[string]string
+		didWriteHTTP1Header bool
+		body                io.ReadCloser
+		params              map[string]string
+		ctx                 context.Context
+	}
+)
 
 func newCtx() *ctx {
 	return &ctx{
@@ -235,6 +240,13 @@ func (c *ctx) writeHeaders() error {
 
 	_, err := c.conn.Write([]byte("\r\n"))
 	return err
+}
+
+func (c *ctx) Context() context.Context {
+	if c.ctx != nil {
+		return c.ctx
+	}
+	return context.Background()
 }
 
 func (c *ctx) Platform() string {
