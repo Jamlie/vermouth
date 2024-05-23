@@ -1,9 +1,8 @@
 package vermouth
 
 import (
+	"errors"
 	"io"
-	"log"
-	"log/slog"
 	"net"
 	"strings"
 	"sync"
@@ -20,9 +19,10 @@ type (
 	}
 
 	Vermouth struct {
-		routes      []route
-		middlewares []MiddlewareFunc
-		mu          sync.Mutex
+		routes       []route
+		middlewares  []MiddlewareFunc
+		mu           sync.Mutex
+		patternGroup string
 	}
 )
 
@@ -33,6 +33,20 @@ func New() *Vermouth {
 	}
 }
 
+func (v *Vermouth) Group(pattern string) *Vermouth {
+	if pattern[0] != '/' {
+		panic("Route must start with /")
+	}
+
+	if pattern[len(pattern)-1] == '/' {
+		pattern = pattern[:len(pattern)-1]
+	}
+
+	v.patternGroup = pattern
+
+	return v
+}
+
 func (v *Vermouth) Use(mw MiddlewareFunc) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -40,22 +54,27 @@ func (v *Vermouth) Use(mw MiddlewareFunc) {
 }
 
 func (v *Vermouth) GET(pattern string, fn HandlerFunc) {
+	pattern = v.patternGroup + pattern
 	v.handleFunc(MethodGet, pattern, fn)
 }
 
 func (v *Vermouth) POST(pattern string, fn HandlerFunc) {
+	pattern = v.patternGroup + pattern
 	v.handleFunc(MethodPost, pattern, fn)
 }
 
 func (v *Vermouth) PUT(pattern string, fn HandlerFunc) {
+	pattern = v.patternGroup + pattern
 	v.handleFunc(MethodPut, pattern, fn)
 }
 
 func (v *Vermouth) DELETE(pattern string, fn HandlerFunc) {
+	pattern = v.patternGroup + pattern
 	v.handleFunc(MethodDelete, pattern, fn)
 }
 
 func (v *Vermouth) PATCH(pattern string, fn HandlerFunc) {
+	pattern = v.patternGroup + pattern
 	v.handleFunc(MethodPatch, pattern, fn)
 }
 
@@ -65,20 +84,19 @@ func (v *Vermouth) handleFunc(method, pattern string, fn HandlerFunc) {
 	v.routes = append(v.routes, route{pattern, fn, method})
 }
 
-func (v *Vermouth) ServeHTTP(conn net.Conn) {
+func (v *Vermouth) ServeHTTP(conn net.Conn) error {
 	defer conn.Close()
 	data := make([]byte, 1024)
 	n, err := conn.Read(data)
 	if err != nil {
-		log.Println(err)
-		return
+		return err
 	}
 
 	connection := strings.Split(string(data[:n]), "\r\n")
 	reqLine := strings.Split(connection[0], " ")
 
 	if len(reqLine) < 2 {
-		return
+		return errors.New("The request does not have a method not a path")
 	}
 
 	method, path := reqLine[0], reqLine[1]
@@ -156,15 +174,10 @@ func (v *Vermouth) ServeHTTP(conn net.Conn) {
 
 		context.setParams(params)
 		err := handler(context)
-		if err != nil {
-			slog.Error("Error handling the endpoint", err)
-		}
-	} else {
-		_, err := context.Err404()
-		if err != nil {
-			slog.Error("Error", err)
-		}
+		return err
 	}
+	_, err = context.Err404()
+	return err
 }
 
 func matchRoute(pattern, path string) (map[string]string, bool) {
@@ -188,6 +201,7 @@ func matchRoute(pattern, path string) (map[string]string, bool) {
 }
 
 func (v *Vermouth) Start(port string) error {
+	errch := make(chan error)
 	l, err := net.Listen("tcp", port)
 	if err != nil {
 		return err
@@ -200,6 +214,21 @@ func (v *Vermouth) Start(port string) error {
 			return err
 		}
 
-		go v.ServeHTTP(conn)
+		go func(conn net.Conn) {
+			err := v.ServeHTTP(conn)
+			if err != nil {
+				errch <- err
+			} else {
+				errch <- nil
+			}
+		}(conn)
+
+		select {
+		case err := <-errch:
+			if err != nil {
+				return err
+			}
+		default:
+		}
 	}
 }
