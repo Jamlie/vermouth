@@ -4,6 +4,12 @@ A simple HTTP library made for education purposes, it supports middlewares, grou
 
 `Vermouth` is built entirely separated from `net/http`, so if you want an alternative that it built around it, you could check [Vodka](https://github.com/Jamlie/vodka), [Gin](https://github.com/gin-gonic/gin), [Echo](https://github.com/labstack/echo), [Chi](https://github.com/go-chi/chi)
 
+## Install
+
+```sh
+go get github.com/Jamlie/vermouth
+```
+
 ## Example
 
 ```go
