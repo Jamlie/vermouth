@@ -17,6 +17,8 @@ var headersError = errors.New("no header exists")
 
 type (
 	Context interface {
+		io.Writer
+		io.Reader
 		String(string, int) (int, error)
 		HTML(string, int) (int, error)
 		JSON(any, int) error
@@ -28,24 +30,12 @@ type (
 		UserAgent() string
 		Accept() string
 		SetHeader(string, string)
-		Write([]byte) (int, error)
-		Read([]byte) (int, error)
 		Body() io.ReadCloser
 		ParseJSON(any) error
 		ParseForm() (url.Values, error)
 		Redirect(string) error
 		Params(string) string
 		Context() context.Context
-
-		setMethod(string)
-		getConn() net.Conn
-		setConn(net.Conn)
-		setHost(string)
-		setPlatform(string)
-		setUserAgent(string)
-		setAccept(string)
-		setBody(io.ReadCloser)
-		setParams(map[string]string)
 	}
 
 	ctx struct {
@@ -216,7 +206,7 @@ func (c *ctx) File(path string, statusCode int) error {
 func (c *ctx) writeHTTP1Header(statusCode int) error {
 	statusCodeString := StatusText(statusCode)
 
-	_, err := c.conn.Write([]byte(fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, statusCodeString)))
+	_, err := c.conn.Write(fmt.Appendf(nil, "HTTP/1.1 %d %s\r\n", statusCode, statusCodeString))
 	if err != nil {
 		c.didWriteHTTP1Header = false
 		return err
@@ -232,7 +222,7 @@ func (c *ctx) writeHeaders() error {
 	}
 
 	for key, value := range c.headers {
-		_, err := c.conn.Write([]byte(fmt.Sprintf("%s: %s\r\n", key, value)))
+		_, err := c.conn.Write(fmt.Appendf(nil, "%s: %s\r\n", key, value))
 		if err != nil {
 			return err
 		}
