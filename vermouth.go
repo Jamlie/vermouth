@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -180,21 +181,54 @@ func (v *Vermouth) ServeHTTP(conn net.Conn) error {
 	return err
 }
 
+func (v *Vermouth) Static(prefix, directory string) {
+	v.GET(prefix+"/:filepath", func(c Context) error {
+		rawPath := c.Params("filepath")
+
+		relPath := filepath.Clean(rawPath)
+		if strings.Contains(relPath, "..") {
+			_, err := c.Err404()
+			return err
+		}
+
+		fullPath := filepath.Join(directory, relPath)
+
+		return c.File(fullPath, 200)
+	})
+}
+
 func matchRoute(pattern, path string) (map[string]string, bool) {
 	patternParts := strings.Split(pattern, "/")
 	pathParts := strings.Split(path, "/")
 
-	if len(patternParts) != len(pathParts) {
-		return nil, false
+	params := make(map[string]string)
+
+	for i, part := range patternParts {
+		if part == "" {
+			continue
+		}
+
+		if strings.HasPrefix(part, ":") {
+			if strings.HasSuffix(part, "*") {
+				key := strings.TrimSuffix(part[1:], "*")
+				params[key] = strings.Join(pathParts[i:], "/")
+				return params, true
+			}
+
+			if i >= len(pathParts) {
+				return nil, false
+			}
+
+			params[part[1:]] = pathParts[i]
+		} else {
+			if i >= len(pathParts) || part != pathParts[i] {
+				return nil, false
+			}
+		}
 	}
 
-	params := make(map[string]string)
-	for i, part := range patternParts {
-		if strings.HasPrefix(part, ":") {
-			params[part[1:]] = pathParts[i]
-		} else if part != pathParts[i] {
-			return nil, false
-		}
+	if len(patternParts) != len(pathParts) {
+		return nil, false
 	}
 
 	return params, true
